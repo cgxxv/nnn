@@ -1,4 +1,4 @@
-.Dd Sep 29, 2021
+.Dd Nov 23, 2021
 .Dt NNN 1
 .Os
 .Sh NAME
@@ -23,7 +23,7 @@ is a performance-optimized, feature-packed fork of noice
 .Em http://git.2f30.org/noice/
 with seamless desktop integration, simplified navigation,
 .Em type-to-nav
-mode with auto select, disk usage analyzer mode, bookmarks,
+mode with dir auto-enter, disk usage analyzer mode, bookmarks,
 contexts, application launcher, familiar navigation shortcuts,
 subshell spawning and much more. It remains a simple and
 efficient file manager that stays out of your way.
@@ -48,7 +48,7 @@ supports the following options:
         auto-setup temporary NNN_FIFO (described in ENVIRONMENT section)
 .Pp
 .Fl A
-        disable directory auto-select in type-to-nav mode
+        disable directory auto-enter in type-to-nav mode
 .Pp
 .Fl "b key"
         specify bookmark key to open
@@ -88,7 +88,8 @@ supports the following options:
         show current file information in info bar (may be slow)
 .Pp
 .Fl J
-        disable auto-proceed on select
+        disable auto-proceed on selection
+        (eg. selecting an entry will no longer move cursor to the next entry)
 .Pp
 .Fl K
         test for keybind collision
@@ -113,10 +114,11 @@ supports the following options:
 .Pp
 .Fl r
         show cp, mv progress
-        (Linux-only, needs advcpmv; '^T' shows the progress on BSD/macOS)
+        (Linux-only, needs \fIadvcpmv\fR; '^T' shows the progress on BSD/macOS)
 .Pp
 .Fl R
-        disable rollover at edges
+        disable rollover at edges (eg. pressing \fIdown\fR while on the last
+        entry will no longer move cursor to the first entry and vice\-versa)
 .Pp
 .Fl "s name"
         load a session by name
@@ -142,8 +144,8 @@ supports the following options:
         show version and exit
 .Pp
 .Fl x
-        show notis on selection cp, mv, rm completion
-        copy path to system clipboard on select
+        show notifications on selection cp, mv, rm completion (requires \fI.ntfy\fR plugin)
+        copy path to system clipboard on selection (requires \fI.cbcp\fR plugin)
         show xterm title (if non-picker mode)
 .Pp
 .Fl h
@@ -233,7 +235,7 @@ in \fBtype-to-nav\fR mode:
   Key  |         Function
 ------ + ------------------------
    '   | Go to first non-dir file
-   +   | Toggle auto-advance
+   +   | Toggle auto-proceed on open
    ,   | Mark CWD
    -   | Go to last visited dir
    .   | Show hidden files
@@ -263,8 +265,8 @@ mode, allowing continuous navigation.
 .br
 When there's a unique match and it's a directory,
 .Nm
-auto selects the directory and enters it in this mode. Use the relevant
-program option to disable this behaviour.
+auto enters it in this mode. Use the relevant program option to disable this
+behaviour.
 .Sh SELECTION
 .Nm
 allows file selection across directories and contexts!
@@ -343,6 +345,20 @@ file. Press '-' to return to the listing dir. Press 'Enter' to open the symlink.
 .Pp
 Listing input stream can be scripted. It can be extended to pick (option -p)
 selected entries from the listed results.
+.Sh BOOKMARKS
+There are 2 ways (can be used together) to manage bookmarks.
+.Pp
+(1) Bookmark keys: See \fINNN_BMS\fR under \fIENVIORNMENT\fR section on how to
+    set bookmark keys.
+.Pp
+(2) Symlinked bookmarks: Symlinked bookmarks can be created at runtime
+    with the \fIB\fR key. They can also be manually created by adding symlinks
+    to bookmarked locations under the bookmarks directory in the nnn config
+    directory (~/.config/nnn/bookmarks).
+.Pp
+Pressing \fIb\fR will list all the bookmark keys set in NNN_BMS. Pressing
+\fIEnter\fR at this prompt will take to the symlink bookmark directory, if
+NNN_BMS is not set, it happens directly on bookmarks key.
 .Sh UNITS
 The minimum file size unit is byte (B). The rest are K, M, G, T, P, E, Z, Y
 (powers of 1024), same as the default units in \fIls\fR.
@@ -368,6 +384,8 @@ separated by \fI;\fR:
 .Bd -literal
     export NNN_BMS="d:$HOME/Docs;u:/home/user/Cam Uploads;D:$HOME/Downloads/"
 .Ed
+.Pp
+These bookmarks are listed in the help and config screen (key ?).
 .Pp
 \fBNNN_PLUG:\fR directly executable plugins as \fIkey_char:plugin\fR pairs
 separated by \fI;\fR:

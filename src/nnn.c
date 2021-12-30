@@ -134,7 +134,7 @@
 #endif
 
 /* Macro definitions */
-#define VERSION      "4.3"
+#define VERSION      "4.4"
 #define GENERAL_INFO "BSD 2-Clause\nhttps://github.com/jarun/nnn"
 
 #ifndef NOSSN
@@ -202,11 +202,13 @@
 #define CTX_MAX 8
 #endif
 
+#ifndef SED
 /* BSDs or Solaris or SunOS */
 #if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__) || defined(sun) || defined(__sun)
 #define SED "gsed"
 #else
 #define SED "sed"
+#endif
 #endif
 
 /* Large selection threshold */
@@ -332,7 +334,7 @@ typedef struct {
 	uint_t prefersel  : 1;  /* Prefer selection over current, if exists */
 	uint_t fileinfo   : 1;  /* Show file information on hover */
 	uint_t nonavopen  : 1;  /* Open file on right arrow or `l` */
-	uint_t autoselect : 1;  /* Auto-select dir in type-to-nav mode */
+	uint_t autoenter  : 1;  /* auto-enter dir in type-to-nav mode */
 	uint_t reserved2  : 1;
 	uint_t useeditor  : 1;  /* Use VISUAL to open text files */
 	uint_t reserved3  : 3;
@@ -412,7 +414,7 @@ static settings cfg = {
 	0, /* prefersel */
 	0, /* fileinfo */
 	0, /* nonavopen */
-	1, /* autoselect */
+	1, /* autoenter */
 	0, /* reserved2 */
 	0, /* useeditor */
 	0, /* reserved3 */
@@ -763,6 +765,7 @@ static const char * const toks[] = {
 #define P_CPMVRNM 1
 #define P_ARCHIVE 2
 #define P_REPLACE 3
+#define P_ARCHIVE_CMD 4
 
 static const char * const patterns[] = {
 	SED" -i 's|^\\(\\(.*/\\)\\(.*\\)$\\)|#\\1\\n\\3|' %s",
@@ -770,6 +773,7 @@ static const char * const patterns[] = {
 		"%s | tr '\\n' '\\0' | xargs -0 -n2 sh -c '%s \"$0\" \"$@\" < /dev/tty'",
 	"\\.(bz|bz2|gz|tar|taz|tbz|tbz2|tgz|z|zip)$",
 	SED" -i 's|^%s\\(.*\\)$|%s\\1|' %s",
+	SED" -ze 's|^%s/||' '%s' | xargs -0 %s %s",
 };
 
 /* Colors */
@@ -1318,7 +1322,7 @@ static void msg(const char *message)
 }
 
 #ifdef KEY_RESIZE
-static void handle_key_resize()
+static void handle_key_resize(void)
 {
 	endwin();
 	refresh();
@@ -2719,23 +2723,15 @@ static void get_archive_cmd(char *cmd, const char *archive)
 
 static void archive_selection(const char *cmd, const char *archive, const char *curpath)
 {
-	/* The 70 comes from the string below */
-	char *buf = (char *)malloc((70 + xstrlen(cmd) + xstrlen(archive)
-				       + xstrlen(curpath) + xstrlen(selpath)) * sizeof(char));
+	char *buf = malloc((xstrlen(patterns[P_ARCHIVE_CMD]) + xstrlen(cmd) + xstrlen(archive)
+	                   + xstrlen(curpath) + xstrlen(selpath)) * sizeof(char));
 	if (!buf) {
 		DPRINTF_S(strerror(errno));
 		printwarn(NULL);
 		return;
 	}
 
-	snprintf(buf, CMD_LEN_MAX,
-#ifdef __linux__
-		SED" -ze 's|^%s/||' '%s' | xargs -0 %s %s", curpath, selpath, cmd, archive
-#else
-		"tr '\\0' '\n' < '%s' | "SED" -e 's|^%s/||' | tr '\n' '\\0' | xargs -0 %s %s",
-		selpath, curpath, cmd, archive
-#endif
-		);
+	snprintf(buf, CMD_LEN_MAX, patterns[P_ARCHIVE_CMD], curpath, selpath, cmd, archive);
 	spawn(utils[UTIL_SH_EXEC], buf, NULL, NULL, F_CLI | F_CONFIRM);
 	free(buf);
 }
@@ -3377,7 +3373,7 @@ static int filterentries(char *path, char *lastname)
 			if (cfg.filtermode) {
 				switch (*ch) {
 				case '\'': // fallthrough /* Go to first non-dir file */
-				case '+': // fallthrough /* Toggle auto-advance */
+				case '+': // fallthrough /* Toggle auto-proceed on open */
 				case ',': // fallthrough /* Mark CWD */
 				case '-': // fallthrough /* Visit last visited dir */
 				case '.': // fallthrough /* Show hidden files */
@@ -3438,17 +3434,17 @@ static int filterentries(char *path, char *lastname)
 			continue;
 		}
 
-		/* If the only match is a dir, auto-select and cd into it */
+		/* If the only match is a dir, auto-enter and cd into it */
 		if (ndents == 1 && cfg.filtermode
-		    && cfg.autoselect && (pdents[0].flags & DIR_OR_DIRLNK)) {
+		    && cfg.autoenter && (pdents[0].flags & DIR_OR_DIRLNK)) {
 			*ch = KEY_ENTER;
 			cur = 0;
 			goto end;
 		}
 
 		/*
-		 * redraw() should be above the auto-select optimization, for
-		 * the case where there's an issue with dir auto-select, say,
+		 * redraw() should be above the auto-enter optimization, for
+		 * the case where there's an issue with dir auto-enter, say,
 		 * due to a permission problem. The transition is _jumpy_ in
 		 * case of such an error. However, we optimize for successful
 		 * cases where the dir has permissions. This skips a redraw().
@@ -3807,7 +3803,7 @@ static char *get_kv_val(kv *kvarr, char *buf, int key, uchar_t max, uchar_t id)
 	if (!kvarr)
 		return NULL;
 
-	for (int r = 0; kvarr[r].key && r < max; ++r) {
+	for (int r = 0; r < max && kvarr[r].key; ++r) {
 		if (kvarr[r].key == key) {
 			/* Do not allocate new memory for plugin */
 			if (id == NNN_PLUG)
@@ -3831,7 +3827,7 @@ static int get_kv_key(kv *kvarr, char *val, uchar_t max, uchar_t id)
 	if (id != NNN_ORDER) /* For now this function supports only order string */
 		return -1;
 
-	for (int r = 0; kvarr[r].key && r < max; ++r) {
+	for (int r = 0; r < max && kvarr[r].key; ++r) {
 		if (xstrcmp((orderstr + kvarr[r].off), val) == 0)
 			return kvarr[r].key;
 	}
@@ -5017,7 +5013,7 @@ static void show_help(const char *path)
 	       "9Lt h  Parent%-12c~ ` @ -  ~, /, start, prev\n"
 	   "5Ret Rt l  Open%-20c'  First file/match\n"
 	       "9g ^A  Top%-21c.  Toggle hidden\n"
-	       "9G ^E  End%-21c+  Toggle auto-advance\n"
+	       "9G ^E  End%-21c+  Toggle auto-proceed on open\n"
 	      "8B (,)  Book(mark)%-11cb ^/  Select bookmark\n"
 		"a1-4  Context%-11c(Sh)Tab  Cycle/new context\n"
 	    "62Esc ^Q  Quit%-20cq  Quit context\n"
@@ -5663,7 +5659,6 @@ static int dentfill(char *path, struct entry **ppdents)
 
 					if (g_state.interrupt)
 						goto exit;
-
 				}
 			} else {
 				/* Do not recount hard links */
@@ -7519,10 +7514,13 @@ nochange:
 				tmp = xreadline(tmp, messages[MSG_ARCHIVE_NAME]);
 				break;
 			case SEL_OPENWITH:
-#ifdef NORL
-				tmp = xreadline(NULL, messages[MSG_OPEN_WITH]);
-#else
-				tmp = getreadline(messages[MSG_OPEN_WITH]);
+#ifndef NORL
+				if (g_state.picker) {
+#endif
+					tmp = xreadline(NULL, messages[MSG_OPEN_WITH]);
+#ifndef NORL
+				} else
+					tmp = getreadline(messages[MSG_OPEN_WITH]);
 #endif
 				break;
 			case SEL_NEW:
@@ -7973,9 +7971,9 @@ static char *load_input(int fd, const char *path)
 		++chunk_count;
 
 		while (off < total_read) {
-			next = memchr(input + off, '\0', total_read - off) + 1;
-			if (next == (void *)1)
+			if ((next = memchr(input + off, '\0', total_read - off)) == NULL)
 				break;
+			++next;
 
 			if (next - input == off + 1) {
 				off = next - input;
@@ -8114,7 +8112,7 @@ static void usage(void)
 #ifndef NOFIFO
 		" -a      auto NNN_FIFO\n"
 #endif
-		" -A      no dir auto-select\n"
+		" -A      no dir auto-enter in type-to-nav\n"
 		" -b key  open bookmark key (trumps -s/S)\n"
 		" -c      cli-only NNN_OPENER (trumps -e)\n"
 		" -C      8-color scheme\n"
@@ -8131,7 +8129,7 @@ static void usage(void)
 		" -g      regex filters\n"
 		" -H      show hidden files\n"
 		" -i      show current file info\n"
-		" -J      no auto-proceed on select\n"
+		" -J      no auto-proceed on selection\n"
 		" -K      detect key collision\n"
 		" -l val  set scroll lines\n"
 		" -n      type-to-nav mode\n"
@@ -8321,7 +8319,7 @@ int main(int argc, char *argv[])
 			break;
 #endif
 		case 'A':
-			cfg.autoselect = 0;
+			cfg.autoenter = 0;
 			break;
 		case 'b':
 			if (env_opts_id < 0)

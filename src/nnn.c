@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2014-2016, Lazaros Koromilas <lostd@2f30.org>
  * Copyright (C) 2014-2016, Dimitris Papastamos <sin@2f30.org>
- * Copyright (C) 2016-2021, Arun Prakash Jana <engineerarun@gmail.com>
+ * Copyright (C) 2016-2022, Arun Prakash Jana <engineerarun@gmail.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -134,7 +134,7 @@
 #endif
 
 /* Macro definitions */
-#define VERSION      "4.4"
+#define VERSION      "4.5"
 #define GENERAL_INFO "BSD 2-Clause\nhttps://github.com/jarun/nnn"
 
 #ifndef NOSSN
@@ -231,6 +231,7 @@
 #define FILE_MISSING  0x08
 #define FILE_SELECTED 0x10
 #define FILE_SCANNED  0x20
+#define FILE_YOUNG    0x40
 
 /* Macros to define process spawn behaviour as flags */
 #define F_NONE    0x00  /* no flag set */
@@ -349,7 +350,7 @@ typedef struct {
 /* Non-persistent program-internal states (alphabeical order) */
 typedef struct {
 	uint_t autofifo   : 1;  /* Auto-create NNN_FIFO */
-	uint_t autonext   : 1;  /* Auto-proceed on open */
+	uint_t autonext   : 1;  /* Auto-jump on open */
 	uint_t dircolor   : 1;  /* Current status of dir color */
 	uint_t dirctx     : 1;  /* Show dirs in context color */
 	uint_t duinit     : 1;  /* Initialize disk usage */
@@ -367,7 +368,7 @@ typedef struct {
 	uint_t runctx     : 3;  /* The context in which plugin is to be run */
 	uint_t runplugin  : 1;  /* Choose plugin mode */
 	uint_t selmode    : 1;  /* Set when selecting files */
-	uint_t stayonsel  : 1;  /* Disable auto-proceed on select */
+	uint_t stayonsel  : 1;  /* Disable auto-jump on select */
 	uint_t trash      : 2;  /* Trash method 0: rm -rf, 1: trash-cli, 2: gio trash */
 	uint_t uidgid     : 1;  /* Show owner and group info */
 	uint_t reserved   : 7;  /* Adjust when adding/removing a field */
@@ -433,6 +434,7 @@ static int nselected;
 #ifndef NOFIFO
 static int fifofd = -1;
 #endif
+static time_t gtimesecs;
 static uint_t idletimeout, selbufpos, selbuflen;
 static ushort_t xlines, xcols;
 static ushort_t idle;
@@ -456,7 +458,7 @@ static char *plgpath;
 static char *pnamebuf, *pselbuf, *findselpos;
 static char *mark;
 #ifndef NOX11
-static char *hostname;
+static char hostname[_POSIX_HOST_NAME_MAX + 1];
 #endif
 #ifndef NOFIFO
 static char *fifopath;
@@ -647,7 +649,7 @@ static const char * const messages[] = {
 	"session name: ",
 	"'c'p / 'm'v as?",
 	"'c'urrent / 's'el?",
-	"%s %s? [Esc cancels]",
+	"%s %s? [Esc/n/N cancels]",
 	"limit exceeded",
 	"'f'ile / 'd'ir / 's'ym / 'h'ard?",
 	"'c'li / 'g'ui?",
@@ -1454,7 +1456,7 @@ static char confirm_force(bool selection)
 
 	int r = get_input(str);
 
-	if (r == ESC)
+	if (r == ESC || r == 'n' || r == 'N')
 		return '\0'; /* cancel */
 	if (r == 'y' || r == 'Y')
 		return 'f'; /* forceful for rm */
@@ -2158,7 +2160,7 @@ static bool initcurses(void *oldmask)
 		}
 
 		/* Get and set the context colors */
-		for (uchar_t i = 0; i <  CTX_MAX; ++i) {
+		for (uchar_t i = 0; i < CTX_MAX; ++i) {
 			pcode = &g_ctx[i].color;
 
 			if (colors && *colors) {
@@ -2188,7 +2190,7 @@ static bool initcurses(void *oldmask)
 
 		memset(icon_positions, 0x7f, sizeof(icon_positions));
 
-		for (uint_t i = 0; i < sizeof(icons_ext)/sizeof(struct icon_pair); ++i) {
+		for (uint_t i = 0; i < ELEMENTS(icons_ext); ++i) {
 			c = TOUPPER(icons_ext[i].match[0]);
 			if (c >= 'A' && c <= 'Z') {
 				if (icon_positions[c - 'A' + 10] == 0x7f7f)
@@ -3165,12 +3167,13 @@ static void showfilterinfo(void)
 
 	i = getorderstr(info);
 
-	snprintf(info + i, REGEX_MAX - i - 1, "  %s [/], %s [:]",
-		 (cfg.regex ? "reg" : "str"),
-		 ((fnstrstr == &strcasestr) ? "ic" : "noic"));
-
 	if (cfg.fileinfo && ndents && get_output("file", "-b", pdents[cur].name, -1, FALSE, FALSE))
 		mvaddstr(xlines - 2, 2, g_buf);
+	else {
+		snprintf(info + i, REGEX_MAX - i - 1, "  %s [/], %s [:]",
+			 (cfg.regex ? "reg" : "str"),
+			 ((fnstrstr == &strcasestr) ? "ic" : "noic"));
+	}
 
 	mvaddstr(xlines - 2, xcols - xstrlen(info), info);
 }
@@ -3373,7 +3376,7 @@ static int filterentries(char *path, char *lastname)
 			if (cfg.filtermode) {
 				switch (*ch) {
 				case '\'': // fallthrough /* Go to first non-dir file */
-				case '+': // fallthrough /* Toggle auto-proceed on open */
+				case '+': // fallthrough /* Toggle file selection */
 				case ',': // fallthrough /* Mark CWD */
 				case '-': // fallthrough /* Visit last visited dir */
 				case '.': // fallthrough /* Show hidden files */
@@ -4007,7 +4010,7 @@ static const struct icon_pair *get_icon(const struct entry *ent)
 {
 	ushort_t i = 0;
 
-	for (; i < sizeof(icons_name)/sizeof(struct icon_pair); ++i)
+	for (; i < ELEMENTS(icons_name); ++i)
 		if (strcasecmp(ent->name, icons_name[i].match) == 0)
 			return &icons_name[i];
 
@@ -4033,7 +4036,7 @@ static const struct icon_pair *get_icon(const struct entry *ent)
 	else
 		i = 36; /* OTHER */
 
-	for (ushort_t j = icon_positions[i]; j < sizeof(icons_ext)/sizeof(struct icon_pair) &&
+	for (ushort_t j = icon_positions[i]; j < ELEMENTS(icons_ext) &&
 			icons_ext[j].match[0] == icons_ext[icon_positions[i]].match[0]; ++j)
 		if (strcasecmp(tmp, icons_ext[j].match) == 0)
 			return &icons_ext[j];
@@ -4063,13 +4066,20 @@ static void print_icon(const struct entry *ent, const int attrs)
 }
 #endif
 
-static void print_time(const time_t *timep)
+static void print_time(const time_t *timep, const uchar_t flags)
 {
 	struct tm t;
+
+	/* Highlight timestamp for entries 5 minutes young */
+	if (flags & FILE_YOUNG)
+		attron(A_REVERSE);
 
 	localtime_r(timep, &t);
 	printw("%s-%02d-%02d %02d:%02d",
 		xitoa(t.tm_year + 1900), t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+
+	if (flags & FILE_YOUNG)
+		attroff(A_REVERSE);
 }
 
 static char get_detail_ind(const mode_t mode)
@@ -4158,7 +4168,7 @@ static void printent(const struct entry *ent, uint_t namecols, bool sel)
 			attron(attrs);
 
 		/* Print details */
-		print_time(&ent->sec);
+		print_time(&ent->sec, ent->flags);
 
 		printw("%s%9s ", perms, (type == S_IFREG || type == S_IFDIR)
 			? coolsize(cfg.blkorder ? (blkcnt_t)ent->blocks << blk_shift : ent->size)
@@ -5013,7 +5023,7 @@ static void show_help(const char *path)
 	       "9Lt h  Parent%-12c~ ` @ -  ~, /, start, prev\n"
 	   "5Ret Rt l  Open%-20c'  First file/match\n"
 	       "9g ^A  Top%-21c.  Toggle hidden\n"
-	       "9G ^E  End%-21c+  Toggle auto-proceed on open\n"
+	       "9G ^E  End%-20c^J  Toggle auto-jump on open\n"
 	      "8B (,)  Book(mark)%-11cb ^/  Select bookmark\n"
 		"a1-4  Context%-11c(Sh)Tab  Cycle/new context\n"
 	    "62Esc ^Q  Quit%-20cq  Quit context\n"
@@ -5030,7 +5040,7 @@ static void show_help(const char *path)
 		 "b^R  Rename/dup%-14cr  Batch rename\n"
 		  "cz  Archive%-17ce  Edit file\n"
 		  "c*  Toggle exe%-14c>  Export list\n"
-	   "5Space ^J  (Un)select%-12cm-m  Select range/clear\n"
+	    "6Space +  (Un)select%-12cm-m  Select range/clear\n"
 	          "ca  Select all%-14cA  Invert sel\n"
 	       "9p ^P  Copy here%-12cw ^W  Cp/mv sel as\n"
 	       "9v ^V  Move here%-15cE  Edit sel list\n"
@@ -5129,6 +5139,7 @@ static void setexports(void)
 			}
 		}
 	}
+	setenv("NNN_INCLUDE_HIDDEN", xitoa(cfg.showhidden), 1);
 }
 
 static bool run_cmd_as_plugin(const char *file, char *runfile, uchar_t flags)
@@ -5371,7 +5382,7 @@ static bool prompt_run(void)
 {
 	bool ret = FALSE;
 	char *cmdline, *next;
-	int cnt_j, cnt_J;
+	int cnt_j, cnt_J, cmd_ret;
 	size_t len;
 
 	const char *xargs_j = "xargs -0 -I{} %s < %s";
@@ -5431,7 +5442,9 @@ static bool prompt_run(void)
 		else if (cnt_J)
 			snprintf(cmd, CMD_LEN_MAX + 32, xargs_J, cmdline, selpath);
 
-		spawn(shell, "-c", (cnt_j || cnt_J) ? cmd : cmdline, NULL, F_CLI | F_CONFIRM);
+		cmd_ret = spawn(shell, "-c", (cnt_j || cnt_J) ? cmd : cmdline, NULL, F_CLI | F_CONFIRM);
+		if ((cnt_j || cnt_J) && cmd_ret == 0)
+			clearselection();
 	}
 
 	return ret;
@@ -5588,6 +5601,7 @@ static int dentfill(char *path, struct entry **ppdents)
 	DIR *dirp = opendir(path);
 
 	ndents = 0;
+	gtimesecs = time(NULL);
 
 	DPRINTF_S(__func__);
 
@@ -5754,6 +5768,9 @@ static int dentfill(char *path, struct entry **ppdents)
 #endif
 		}
 
+		if ((gtimesecs - sb.st_mtime <= 300) || (gtimesecs - sb.st_ctime <= 300))
+			entflags |= FILE_YOUNG;
+
 #if !(defined(__sun) || defined(__HAIKU__))
 		if (!flags && dp->d_type == DT_LNK) {
 			 /* Do not add sizes for links */
@@ -5846,7 +5863,9 @@ static void populate(char *path, char *lastname)
 	if (!ndents)
 		return;
 
+#ifndef NOSORT
 	ENTSORT(pdents, ndents, entrycmpfn);
+#endif
 
 #ifdef DEBUG
 	clock_gettime(CLOCK_REALTIME, &ts2);
@@ -6288,7 +6307,7 @@ static void statusbar(char *path)
 			addstr(sort);
 
 		/* Timestamp */
-		print_time(&pent->sec);
+		print_time(&pent->sec, pent->flags);
 
 		addch(' ');
 		addstr(get_lsperms(pent->mode));
@@ -6340,13 +6359,9 @@ static void statusbar(char *path)
 
 static inline void markhovered(void)
 {
-	if (cfg.showdetail && ndents) { /* Reversed block for hovered entry */
+	if (cfg.showdetail && ndents) { /* Bold forward arrowhead */
 		tocursor();
-#ifdef ICONS_ENABLED
-		addstr(MD_ARROW_FORWARD);
-#else
-		addch(' ' | A_REVERSE);
-#endif
+		addch('>' | A_BOLD);
 	}
 }
 
@@ -6354,7 +6369,7 @@ static int adjust_cols(int n)
 {
 	/* Calculate the number of cols available to print entry name */
 #ifdef ICONS_ENABLED
-	n -= (g_state.oldcolor ? 0 : 1 + xstrlen(ICON_PADDING_LEFT) + xstrlen(ICON_PADDING_RIGHT));
+	n -= (g_state.oldcolor ? 0 : 1 + ICON_PADDING_LEFT_LEN + ICON_PADDING_RIGHT_LEN);
 #endif
 	if (cfg.showdetail) {
 		/* Fallback to light mode if less than 35 columns */
@@ -6628,6 +6643,10 @@ static bool browse(char *ipath, const char *session, int pkey)
 	if (!pnamebuf)
 		errexit();
 
+	/* The following call is added to handle a broken window at start */
+	if (presel == FILTER)
+		handle_key_resize();
+
 begin:
 	/*
 	 * Can fail when permissions change while browsing.
@@ -6893,7 +6912,7 @@ nochange:
 			if (!S_ISREG(sb.st_mode)) {
 				printwait(messages[MSG_UNSUPPORTED], &presel);
 				goto nochange;
-                        }
+			}
 
 			/* Handle plugin selection mode */
 			if (g_state.runplugin) {
@@ -7149,8 +7168,6 @@ nochange:
 			add_bookmark(path, newpath, &presel);
 			goto nochange;
 		case SEL_FLTR:
-			if (!ndents)
-				goto nochange;
 			/* Unwatch dir if we are still in a filtered view */
 #ifdef LINUX_INOTIFY
 			if (inotify_wd >= 0) {
@@ -7266,7 +7283,7 @@ nochange:
 				break;
 			case SEL_RENAMEMUL:
 				endselection(TRUE);
-				setenv("INCLUDE_HIDDEN", xitoa(cfg.showhidden), 1);
+				setenv("NNN_INCLUDE_HIDDEN", xitoa(cfg.showhidden), 1);
 				setenv("NNN_LIST", listpath ? listroot : "", 1);
 
 				if (!(getutil(utils[UTIL_BASH])
@@ -7636,7 +7653,7 @@ nochange:
 					mkpath(path, tmp, newpath);
 					ret = xmktree(newpath, r == 'f' ? FALSE : TRUE);
 				} else if (r == 's' || r == 'h') {
-					if (tmp[0] == '@' && tmp[1] == '\0')
+					if (nselected > 1 && tmp[0] == '@' && tmp[1] == '\0')
 						tmp[0] = '\0';
 					ret = xlink(tmp, path, (ndents ? pdents[cur].name : NULL),
 						  newpath, &presel, r);
@@ -7801,9 +7818,9 @@ nochange:
 			if (sel == SEL_QUITCTX) {
 				int ctx = cfg.curctx;
 
-				for (r = (ctx + 1) & ~CTX_MAX;
+				for (r = (ctx - 1) & (CTX_MAX - 1);
 				     (r != ctx) && !g_ctx[r].c_cfg.ctxactive;
-				     r = ((r + 1) & ~CTX_MAX)) {
+				     r = ((r - 1) & (CTX_MAX - 1))) {
 				};
 
 				if (r != ctx) {
@@ -8091,7 +8108,7 @@ static void check_key_collision(void)
 	int key;
 	bool bitmap[KEY_MAX] = {FALSE};
 
-	for (ullong_t i = 0; i < sizeof(bindings) / sizeof(struct key); ++i) {
+	for (ullong_t i = 0; i < ELEMENTS(bindings); ++i) {
 		key = bindings[i].sym;
 
 		if (bitmap[key])
@@ -8129,7 +8146,7 @@ static void usage(void)
 		" -g      regex filters\n"
 		" -H      show hidden files\n"
 		" -i      show current file info\n"
-		" -J      no auto-proceed on selection\n"
+		" -J      no auto-jump on selection\n"
 		" -K      detect key collision\n"
 		" -l val  set scroll lines\n"
 		" -n      type-to-nav mode\n"
@@ -8263,8 +8280,6 @@ static void cleanup(void)
 	if (cfg.x11 && !g_state.picker) {
 		printf("\033[23;0t"); /* reset terminal window title */
 		fflush(stdout);
-
-		free(hostname);
 	}
 #endif
 	free(selpath);
@@ -8629,7 +8644,7 @@ int main(int argc, char *argv[])
 
 #ifdef LINUX_INOTIFY
 	/* Initialize inotify */
-	inotify_fd = inotify_init1(IN_NONBLOCK);
+	inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
 	if (inotify_fd < 0) {
 		xerror();
 		return EXIT_FAILURE;
@@ -8706,14 +8721,8 @@ int main(int argc, char *argv[])
 		/* Save terminal window title */
 		printf("\033[22;0t");
 		fflush(stdout);
-
-		hostname = malloc(_POSIX_HOST_NAME_MAX + 1);
-		if (!hostname) {
-			xerror();
-			return EXIT_FAILURE;
-		}
-		gethostname(hostname, _POSIX_HOST_NAME_MAX);
-		hostname[_POSIX_HOST_NAME_MAX] = '\0';
+		gethostname(hostname, sizeof(hostname));
+		hostname[sizeof(hostname) - 1] = '\0';
 	}
 #endif
 

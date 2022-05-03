@@ -26,7 +26,8 @@ O_BENCH := 0  # benchmark mode (stops at first user input)
 O_NOSSN := 0  # disable session support
 O_NOUG := 0  # disable user, group name in status bar
 O_NOX11 := 0  # disable X11 integration
-O_MATCHFLTR := 1  # allow filters without matches
+O_MATCHFLTR := 0  # allow filters without matches
+O_NOSORT := 0  # disable sorting entries on dir load
 
 # User patches
 O_GITSTATUS := 1 # add git status to detail view
@@ -121,6 +122,10 @@ ifeq ($(strip $(O_MATCHFLTR)),1)
 	CPPFLAGS += -DMATCHFLTR
 endif
 
+ifeq ($(strip $(O_NOSORT)),1)
+	CPPFLAGS += -DNOSORT
+endif
+
 ifeq ($(shell $(PKG_CONFIG) ncursesw && echo 1),1)
 	CFLAGS_CURSES ?= $(shell $(PKG_CONFIG) --cflags ncursesw)
 	LDLIBS_CURSES ?= $(shell $(PKG_CONFIG) --libs   ncursesw)
@@ -172,7 +177,7 @@ endif
 
 all: $(BIN)
 
-$(BIN): $(SRC) $(HEADERS)
+$(BIN): $(SRC) $(HEADERS) Makefile
 	@$(MAKE) --silent prepatch
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(GETTIME_C) $< $(LDLIBS)
 	@$(MAKE) --silent postpatch

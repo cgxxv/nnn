@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2014-2016, Lazaros Koromilas <lostd@2f30.org>
  * Copyright (C) 2014-2016, Dimitris Papastamos <sin@2f30.org>
- * Copyright (C) 2016-2021, Arun Prakash Jana <engineerarun@gmail.com>
+ * Copyright (C) 2016-2022, Arun Prakash Jana <engineerarun@gmail.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -212,8 +212,8 @@ static struct key bindings[] = {
 	/* Redraw window */
 	{ CONTROL('L'),   SEL_REDRAW },
 	/* Select current file path */
-	{ CONTROL('J'),   SEL_SEL },
 	{ ' ',            SEL_SEL },
+	{ '+',            SEL_SEL },
 	/* Toggle select multiple files */
 	{ 'm',            SEL_SELMUL },
 	/* Select all files in current dir */
@@ -247,8 +247,8 @@ static struct key bindings[] = {
 	{ 'u',            SEL_UMOUNT },
 	/* Show help */
 	{ '?',            SEL_HELP },
-	/* Quit a context */
-	{ '+',            SEL_AUTONEXT },
+	/* Toggle auto-jump on open */
+	{ CONTROL('J'),   SEL_AUTONEXT },
 	/* Edit in EDITOR */
 	{ 'e',            SEL_EDIT },
 	/* Run a plugin */

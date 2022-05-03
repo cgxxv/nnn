@@ -64,7 +64,7 @@ Runs on the Pi, [Termux](https://www.youtube.com/embed/AbaauM7gUJw) (Android), L
   - Remote mounts (needs `sshfs`, `rclone`)
   - Familiar shortcuts (arrows, <kbd>~</kbd>, <kbd>-</kbd>, <kbd>@</kbd>), quick look-up
   - `cd` on quit (*easy* shell integration)
-  - Auto-proceed on file open and selection
+  - Jump to next file on file open and selection
 - Search
   - Instant filtering with *search-as-you-type*
   - Regex (POSIX/PCRE) and string (default) filters
@@ -149,7 +149,7 @@ Don't memorize! Arrows, <kbd>/</kbd>, <kbd>q</kbd> suffice. <kbd>Tab</kbd> creat
 
 ## Developers
 
-- [Arun Prakash Jana](https://github.com/jarun) (Copyright © 2016-2021)
+- [Arun Prakash Jana](https://github.com/jarun) (Copyright © 2016-2022)
 - [0xACE](https://github.com/0xACE)
 - [Anna Arad](https://github.com/annagrram)
 - [KlzXS](https://github.com/KlzXS)
@@ -159,4 +159,4 @@ Don't memorize! Arrows, <kbd>/</kbd>, <kbd>q</kbd> suffice. <kbd>Tab</kbd> creat
 - [Sijmen J. Mulder](https://github.com/sjmulder)
 - and other contributors
 
-Visit the [ToDo list](https://github.com/jarun/nnn/issues/1219) to contribute or see the features in progress.
+Visit the [ToDo list](https://github.com/jarun/nnn/issues/1348) to contribute or see the features in progress.

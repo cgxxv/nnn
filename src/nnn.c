@@ -124,7 +124,7 @@
 #include "nnn.h"
 #include "dbg.h"
 
-#if defined(ICONS) || defined(NERD)
+#if defined(ICONS) || defined(NERD) || defined(EMOJI)
 #include "icons.h"
 #define ICONS_ENABLED
 #endif
@@ -1647,8 +1647,13 @@ static void invertselbuf(const int pathlen)
 	char *found;
 	int i, nmarked = 0, prev = 0;
 	struct entry *dentp;
-	selmark *marked = malloc(nselected * sizeof(selmark));
 	bool scan = FALSE;
+	selmark *marked = malloc(nselected * sizeof(selmark));
+
+	if (!marked) {
+		printwarn(NULL);
+		return;
+	}
 
 	/* First pass: inversion */
 	for (i = 0; i < ndents; ++i) {
@@ -5142,7 +5147,7 @@ static void setexports(void)
 	setenv("NNN_INCLUDE_HIDDEN", xitoa(cfg.showhidden), 1);
 }
 
-static bool run_cmd_as_plugin(const char *file, char *runfile, uchar_t flags)
+static void run_cmd_as_plugin(const char *file, char *runfile, uchar_t flags)
 {
 	size_t len;
 
@@ -5155,18 +5160,18 @@ static bool run_cmd_as_plugin(const char *file, char *runfile, uchar_t flags)
 		--len;
 	}
 
-	if (flags & F_PAGE)
-		get_output(g_buf, NULL, NULL, -1, TRUE, TRUE);
-	else if (flags & F_NOTRACE) {
+	if ((flags & F_PAGE) || (flags & F_NOTRACE)) {
 		if (is_suffix(g_buf, " $nnn"))
 			g_buf[len - 5] = '\0';
 		else
 			runfile = NULL;
-		spawn(g_buf, runfile, NULL, NULL, flags);
+
+		if (flags & F_PAGE)
+			get_output(g_buf, runfile, NULL, -1, TRUE, TRUE);
+		else // F_NOTRACE
+			spawn(g_buf, runfile, NULL, NULL, flags);
 	} else
 		spawn(utils[UTIL_SH_EXEC], g_buf, NULL, NULL, flags);
-
-	return TRUE;
 }
 
 static bool plctrl_init(void)
@@ -5296,8 +5301,10 @@ static bool run_plugin(char **path, const char *file, char *runfile, char **last
 		if (!*file)
 			return FALSE;
 
-		if ((flags & F_NOTRACE) || (flags & F_PAGE))
-			return run_cmd_as_plugin(file, runfile, flags);
+		if ((flags & F_NOTRACE) || (flags & F_PAGE)) {
+			run_cmd_as_plugin(file, runfile, flags);
+			return TRUE;
+		}
 
 		cmd_as_plugin = TRUE;
 	}
@@ -5331,7 +5338,7 @@ static bool run_plugin(char **path, const char *file, char *runfile, char **last
 			} else
 				spawn(g_buf, NULL, *path, sel, 0);
 		} else
-			run_cmd_as_plugin(file, NULL, flags);
+			run_cmd_as_plugin(file, runfile, flags);
 
 		close(wfd);
 		_exit(EXIT_SUCCESS);
@@ -5561,16 +5568,23 @@ static void dirwalk(char *path, int entnum, bool mountpoint)
 	refresh();
 }
 
-static void prep_threads(void)
+static bool prep_threads(void)
 {
 	if (!g_state.duinit) {
 		/* drop MSB 1s */
 		threadbmp >>= (32 - NUM_DU_THREADS);
 
-		core_blocks = calloc(NUM_DU_THREADS, sizeof(blkcnt_t));
-		core_data = calloc(NUM_DU_THREADS, sizeof(thread_data));
-		core_files = calloc(NUM_DU_THREADS, sizeof(ullong_t));
+		if (!core_blocks)
+			core_blocks = calloc(NUM_DU_THREADS, sizeof(blkcnt_t));
+		if (!core_data)
+			core_data = calloc(NUM_DU_THREADS, sizeof(thread_data));
+		if (!core_files)
+			core_files = calloc(NUM_DU_THREADS, sizeof(ullong_t));
 
+		if (!core_blocks || !core_data || !core_files) {
+			printwarn(NULL);
+			return FALSE;
+		}
 #ifndef __APPLE__
 		/* Increase current open file descriptor limit */
 		max_openfds();
@@ -5581,6 +5595,7 @@ static void prep_threads(void)
 		memset(core_data, 0, NUM_DU_THREADS * sizeof(thread_data));
 		memset(core_files, 0, NUM_DU_THREADS * sizeof(ullong_t));
 	}
+	return TRUE;
 }
 
 /* Skip self and parent */
@@ -5625,7 +5640,8 @@ static int dentfill(char *path, struct entry **ppdents)
 		} else
 			memset(ihashbmp, 0, HASH_OCTETS << 3);
 
-		prep_threads();
+		if (!prep_threads())
+			goto exit;
 
 		attron(COLOR_PAIR(cfg.curctx + 1));
 	}
@@ -5834,7 +5850,7 @@ static int dentfill(char *path, struct entry **ppdents)
 	} while ((dp = readdir(dirp)));
 
 exit:
-	if (cfg.blkorder) {
+	if (g_state.duinit && cfg.blkorder) {
 		while (active_threads);
 
 		attroff(COLOR_PAIR(cfg.curctx + 1));
@@ -6369,7 +6385,7 @@ static int adjust_cols(int n)
 {
 	/* Calculate the number of cols available to print entry name */
 #ifdef ICONS_ENABLED
-	n -= (g_state.oldcolor ? 0 : 1 + ICON_PADDING_LEFT_LEN + ICON_PADDING_RIGHT_LEN);
+	n -= (g_state.oldcolor ? 0 : ICON_SIZE + ICON_PADDING_LEFT_LEN + ICON_PADDING_RIGHT_LEN);
 #endif
 	if (cfg.showdetail) {
 		/* Fallback to light mode if less than 35 columns */

@@ -367,11 +367,12 @@ typedef struct {
 	uint_t rangesel   : 1;  /* Range selection on */
 	uint_t runctx     : 3;  /* The context in which plugin is to be run */
 	uint_t runplugin  : 1;  /* Choose plugin mode */
+	uint_t selbm      : 1;  /* Select a bookmark from bookmarks directory */
 	uint_t selmode    : 1;  /* Set when selecting files */
 	uint_t stayonsel  : 1;  /* Disable auto-jump on select */
 	uint_t trash      : 2;  /* Trash method 0: rm -rf, 1: trash-cli, 2: gio trash */
 	uint_t uidgid     : 1;  /* Show owner and group info */
-	uint_t reserved   : 7;  /* Adjust when adding/removing a field */
+	uint_t reserved   : 6;  /* Adjust when adding/removing a field */
 } runstate;
 
 /* Contexts or workspaces */
@@ -638,6 +639,7 @@ static char * const utils[] = {
 #define MSG_INVALID_KEY  40
 #define MSG_NOCHANGE     41
 #define MSG_DIR_CHANGED  42
+#define MSG_BM_NAME      43
 
 static const char * const messages[] = {
 	"",
@@ -672,7 +674,7 @@ static const char * const messages[] = {
 	"too few cols!",
 	"'s'shfs / 'r'clone?",
 	"refresh if slow",
-	"app name: ",
+	"app: ",
 	"'o'pen / e'x'tract / 'l's / 'm'nt?",
 	"keys:",
 	"invalid regex",
@@ -683,6 +685,7 @@ static const char * const messages[] = {
 	"invalid key",
 	"unchanged",
 	"dir changed, range sel off",
+	"name: ",
 };
 
 /* Supported configuration environment variables */
@@ -2539,7 +2542,7 @@ static bool cpmv_rename(int choice, const char *path)
 	uint_t count = 0, lines = 0;
 	bool ret = FALSE;
 	char *cmd = (choice == 'c' ? cp : mv);
-	char buf[sizeof(patterns[P_CPMVRNM]) + sizeof(cmd) + (PATH_MAX << 1)];
+	char buf[sizeof(patterns[P_CPMVRNM]) + (MAX(sizeof(cp), sizeof(mv))) + (PATH_MAX << 1)];
 
 	fd = create_tmp_file();
 	if (fd == -1)
@@ -4983,13 +4986,17 @@ static size_t handle_bookmark(const char *bmark, char *newpath)
 	r = FALSE;
 	if (fd == ',') /* Visit marked directory */
 		bmark ? xstrsncpy(newpath, bmark, PATH_MAX) : (r = MSG_NOT_SET);
-	else if (fd == '\r') /* Visit bookmarks directory */
+	else if (fd == '\r') { /* Visit bookmarks directory */
 		mkpath(cfgpath, toks[TOK_BM], newpath);
-	else if (!get_kv_val(bookmark, newpath, fd, maxbm, NNN_BMS))
+		g_state.selbm = 1;
+	} else if (!get_kv_val(bookmark, newpath, fd, maxbm, NNN_BMS))
 		r = MSG_INVALID_KEY;
 
-	if (!r && chdir(newpath) == -1)
+	if (!r && chdir(newpath) == -1) {
 		r = MSG_ACCESS;
+		if (g_state.selbm)
+			g_state.selbm = 0;
+	}
 
 	return r;
 }
@@ -4998,7 +5005,7 @@ static void add_bookmark(char *path, char *newpath, int *presel)
 {
 	char *dir = xbasename(path);
 
-	dir = xreadline(dir[0] ? dir : NULL, "name: ");
+	dir = xreadline(dir[0] ? dir : NULL, messages[MSG_BM_NAME]);
 	if (dir && *dir) {
 		size_t r = mkpath(cfgpath, toks[TOK_BM], newpath);
 
@@ -6590,7 +6597,6 @@ static bool cdprep(char *lastdir, char *lastname, char *path, char *newpath)
 static bool browse(char *ipath, const char *session, int pkey)
 {
 	char newpath[PATH_MAX] __attribute__ ((aligned)),
-	     rundir[PATH_MAX] __attribute__ ((aligned)),
 	     runfile[NAME_MAX + 1] __attribute__ ((aligned));
 	char *path, *lastdir, *lastname, *dir, *tmp;
 	pEntry pent;
@@ -6643,7 +6649,7 @@ static bool browse(char *ipath, const char *session, int pkey)
 	}
 #endif
 
-	newpath[0] = rundir[0] = runfile[0] = '\0';
+	newpath[0] = runfile[0] = '\0';
 
 	presel = pkey ? ';' : ((cfg.filtermode
 			|| (session && (g_ctx[cfg.curctx].c_fltr[0] == FILTER
@@ -6898,11 +6904,18 @@ nochange:
 			/* Cannot descend in empty directories */
 			if (!ndents) {
 				cd = FALSE;
+				g_state.selbm = g_state.runplugin = 0;
 				goto begin;
 			}
 
 			pent = &pdents[cur];
-			mkpath(path, pent->name, newpath);
+			if (g_state.selbm) {
+				S_ISLNK(pent->mode)
+					? (realpath(pent->name, newpath) && xstrsncpy(path, lastdir, PATH_MAX))
+					: mkpath(path, pent->name, newpath);
+				g_state.selbm = 0;
+			} else
+				mkpath(path, pent->name, newpath);
 			DPRINTF_S(newpath);
 
 			/* Visit directory */
@@ -6912,8 +6925,7 @@ nochange:
 					goto nochange;
 				}
 
-				cdprep(lastdir, lastname, path, newpath)
-					? (presel = FILTER) : (watch = TRUE);
+				cdprep(lastdir, lastname, path, newpath) ? (presel = FILTER) : (watch = TRUE);
 				goto begin;
 			}
 
@@ -6937,13 +6949,11 @@ nochange:
 				if ((g_state.runctx == cfg.curctx) && !strcmp(path, plgpath)) {
 					endselection(FALSE);
 					/* Copy path so we can return back to earlier dir */
-					xstrsncpy(path, rundir, PATH_MAX);
-					rundir[0] = '\0';
+					xstrsncpy(path, lastdir, PATH_MAX);
 					clearfilter();
 
 					if (chdir(path) == -1
-					    || !run_plugin(&path, pent->name,
-								    runfile, &lastname, &lastdir)) {
+					    || !run_plugin(&path, pent->name, runfile, &lastname, &lastdir)) {
 						DPRINTF_S("plugin failed!");
 					}
 
@@ -7742,15 +7752,15 @@ nochange:
 				}
 			} else { /* 'Return/Enter' enters the plugin directory */
 				g_state.runplugin ^= 1;
-				if (!g_state.runplugin && rundir[0]) {
+				if (!g_state.runplugin) {
 					/*
 					 * If toggled, and still in the plugin dir,
 					 * switch to original directory
 					 */
 					if (strcmp(path, plgpath) == 0) {
-						xstrsncpy(path, rundir, PATH_MAX);
+						xstrsncpy(path, lastdir, PATH_MAX);
 						xstrsncpy(lastname, runfile, NAME_MAX + 1);
-						rundir[0] = runfile[0] = '\0';
+						runfile[0] = '\0';
 						setdirwatch();
 						goto begin;
 					}
@@ -7760,7 +7770,6 @@ nochange:
 				}
 
 				xstrsncpy(lastdir, path, PATH_MAX);
-				xstrsncpy(rundir, path, PATH_MAX);
 				xstrsncpy(path, plgpath, PATH_MAX);
 				if (ndents)
 					xstrsncpy(runfile, pdents[cur].name, NAME_MAX);

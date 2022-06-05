@@ -11,7 +11,7 @@ CP ?= cp
 
 CFLAGS_OPTIMIZATION ?= -O3
 
-O_DEBUG := 1  # debug binary
+O_DEBUG := 0  # debug binary
 O_NORL := 0  # no readline support
 O_PCRE := 1  # link with PCRE library
 O_NOLC := 0  # no locale support
@@ -20,7 +20,7 @@ O_NOBATCH := 0  # no built-in batch renamer
 O_NOFIFO := 0  # no FIFO previewer support
 O_CTX8 := 1  # enable 8 contexts
 O_ICONS := 0  # support icons-in-terminal
-O_NERD := 1  # support icons-nerdfont
+O_NERD := 0  # support icons-nerdfont
 O_EMOJI := 0  # support emoji
 O_QSORT := 1  # use Alexey Tourbin's QSORT implementation
 O_BENCH := 0  # benchmark mode (stops at first user input)

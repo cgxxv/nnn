@@ -66,9 +66,10 @@ Plugins extend the capabilities of `nnn`. They are _executable_ scripts (or bina
 | [x2sel](x2sel) | Copy file list from system clipboard to selection | sh | _see in-file docs_ |
 | [xdgdefault](xdgdefault) | Set the default app for the hovered file type | sh | xdg-utils, fzf/dmenu |
 
-Note:
+Notes:
 
 1. A plugin has to explicitly request `nnn` to clear the selection e.g. after operating on the selected files.
+2. Files starting with a dot in the `plugins` directory are internal files and should not be used as plugins.
 
 ### Table of contents
 
@@ -353,7 +354,7 @@ fi
 ## Contributing plugins
 
 1. Add informative sections like _Description_, _Notes_, _Dependencies_, _Shell_, _Author_ etc. in the plugin.
-2. Add an entry in the table above.
+2. Add an entry in the table above. Note that the list is alphabetically ordered by plugin name.
 3. Keep non-portable commands (like `notify-send`) commented so users from any other OS/DE aren't surprised.
 4. The plugin file should be executable.
 5. If your plugin stores data, use `${XDG_CACHE_HOME:-$HOME/.cache}/nnn`. Document it _in-file_.

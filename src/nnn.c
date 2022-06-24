@@ -350,11 +350,11 @@ typedef struct {
 /* Non-persistent program-internal states (alphabeical order) */
 typedef struct {
 	uint_t autofifo   : 1;  /* Auto-create NNN_FIFO */
-	uint_t autonext   : 1;  /* Auto-jump on open */
+	uint_t autonext   : 1;  /* Auto-advance on file open */
 	uint_t dircolor   : 1;  /* Current status of dir color */
 	uint_t dirctx     : 1;  /* Show dirs in context color */
 	uint_t duinit     : 1;  /* Initialize disk usage */
-	uint_t fifomode   : 1;  /* FIFO notify mode: 0: preview, 1: explore */
+	uint_t fifomode   : 1;  /* FIFO notify mode: 0: preview, 1: explorer */
 	uint_t forcequit  : 1;  /* Do not prompt on quit */
 	uint_t initfile   : 1;  /* Positional arg is a file */
 	uint_t interrupt  : 1;  /* Program received an interrupt */
@@ -369,7 +369,7 @@ typedef struct {
 	uint_t runplugin  : 1;  /* Choose plugin mode */
 	uint_t selbm      : 1;  /* Select a bookmark from bookmarks directory */
 	uint_t selmode    : 1;  /* Set when selecting files */
-	uint_t stayonsel  : 1;  /* Disable auto-jump on select */
+	uint_t stayonsel  : 1;  /* Disable auto-advance on selection */
 	uint_t trash      : 2;  /* Trash method 0: rm -rf, 1: trash-cli, 2: gio trash */
 	uint_t uidgid     : 1;  /* Show owner and group info */
 	uint_t reserved   : 6;  /* Adjust when adding/removing a field */
@@ -750,7 +750,7 @@ static char mv[] = "mv -i";
 #endif
 
 /* Archive commands */
-static const char * const archive_cmd[] = {"atool -a", "bsdtar -acvf", "zip -r", "tar -acvf"};
+static const char * const archive_cmd[] = {"bsdtar -acvf", "atool -a", "zip -r", "tar -acvf"};
 
 /* Tokens used for path creation */
 #define TOK_BM  0
@@ -776,7 +776,7 @@ static const char * const patterns[] = {
 	SED" -i 's|^\\(\\(.*/\\)\\(.*\\)$\\)|#\\1\\n\\3|' %s",
 	SED" 's|^\\([^#/][^/]\\?.*\\)$|%s/\\1|;s|^#\\(/.*\\)$|\\1|' "
 		"%s | tr '\\n' '\\0' | xargs -0 -n2 sh -c '%s \"$0\" \"$@\" < /dev/tty'",
-	"\\.(bz|bz2|gz|tar|taz|tbz|tbz2|tgz|z|zip)$",
+	"\\.(bz|bz2|gz|tar|taz|tbz|tbz2|tgz|z|zip)$", /* Basic formats that don't need external tools */
 	SED" -i 's|^%s\\(.*\\)$|%s\\1|' %s",
 	SED" -ze 's|^%s/||' '%s' | xargs -0 %s %s",
 };
@@ -2720,9 +2720,9 @@ static void get_archive_cmd(char *cmd, const char *archive)
 {
 	uchar_t i = 3;
 
-	if (getutil(utils[UTIL_ATOOL]))
+	if (getutil(utils[UTIL_BSDTAR]))
 		i = 0;
-	else if (getutil(utils[UTIL_BSDTAR]))
+	else if (getutil(utils[UTIL_ATOOL]))
 		i = 1;
 	else if (is_suffix(archive, ".zip"))
 		i = 2;
@@ -3446,8 +3446,7 @@ static int filterentries(char *path, char *lastname)
 		}
 
 		/* If the only match is a dir, auto-enter and cd into it */
-		if (ndents == 1 && cfg.filtermode
-		    && cfg.autoenter && (pdents[0].flags & DIR_OR_DIRLNK)) {
+		if ((ndents == 1) && cfg.autoenter && (pdents[0].flags & DIR_OR_DIRLNK)) {
 			*ch = KEY_ENTER;
 			cur = 0;
 			goto end;
@@ -4526,7 +4525,11 @@ static bool show_stats(char *fpath)
 		("file " FILE_MIME_OPTS),
 #endif
 		"file -b",
+#if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
+		"stat -x",
+#else
 		"stat",
+#endif
 	};
 
 	size_t r = ELEMENTS(cmds);
@@ -4638,7 +4641,8 @@ static bool handle_archive(char *fpath /* in-out param */, char op)
 	char arg[] = "-tvf"; /* options for tar/bsdtar to list files */
 	char *util, *outdir = NULL;
 	bool x_to = FALSE;
-	bool is_atool = getutil(utils[UTIL_ATOOL]);
+	bool is_bsdtar = getutil(utils[UTIL_BSDTAR]);
+	bool is_atool = !is_bsdtar && getutil(utils[UTIL_ATOOL]);
 
 	if (op == 'x') {
 		outdir = xreadline(is_atool ? "." : xbasename(fpath), messages[MSG_NEW_PATH]);
@@ -4658,14 +4662,14 @@ static bool handle_archive(char *fpath /* in-out param */, char op)
 		}
 	}
 
-	if (is_atool) {
-		util = utils[UTIL_ATOOL];
-		arg[1] = op;
-		arg[2] = '\0';
-	} else if (getutil(utils[UTIL_BSDTAR])) {
+	if (is_bsdtar) {
 		util = utils[UTIL_BSDTAR];
 		if (op == 'x')
 			arg[1] = op;
+	} else if (is_atool) {
+		util = utils[UTIL_ATOOL];
+		arg[1] = op;
+		arg[2] = '\0';
 	} else if (is_suffix(fpath, ".zip")) {
 		util = utils[UTIL_UNZIP];
 		arg[1] = (op == 'l') ? 'v' /* verbose listing */ : '\0';
@@ -5035,7 +5039,7 @@ static void show_help(const char *path)
 	       "9Lt h  Parent%-12c~ ` @ -  ~, /, start, prev\n"
 	   "5Ret Rt l  Open%-20c'  First file/match\n"
 	       "9g ^A  Top%-21c.  Toggle hidden\n"
-	       "9G ^E  End%-20c^J  Toggle auto-jump on open\n"
+	       "9G ^E  End%-20c^J  Toggle auto-advance on open\n"
 	      "8B (,)  Book(mark)%-11cb ^/  Select bookmark\n"
 		"a1-4  Context%-11c(Sh)Tab  Cycle/new context\n"
 	    "62Esc ^Q  Quit%-20cq  Quit context\n"
@@ -6909,13 +6913,11 @@ nochange:
 			}
 
 			pent = &pdents[cur];
-			if (g_state.selbm) {
-				S_ISLNK(pent->mode)
-					? (realpath(pent->name, newpath) && xstrsncpy(path, lastdir, PATH_MAX))
-					: mkpath(path, pent->name, newpath);
-				g_state.selbm = 0;
-			} else
+			if (!g_state.selbm || !(S_ISLNK(pent->mode) &&
+			                        realpath(pent->name, newpath) &&
+			                        xstrsncpy(path, lastdir, PATH_MAX)))
 				mkpath(path, pent->name, newpath);
+			g_state.selbm = 0;
 			DPRINTF_S(newpath);
 
 			/* Visit directory */
@@ -7114,6 +7116,7 @@ nochange:
 				goto nochange;
 			}
 
+			g_state.selbm = 0;
 			if (strcmp(path, dir) == 0) {
 				if (dir == ipath) {
 					if (cfg.filtermode)
@@ -7138,6 +7141,8 @@ nochange:
 					goto nochange;
 				}
 
+				if (g_state.selbm == 1) /* Allow filtering in bookmarks directory */
+					presel = FILTER;
 				if (strcmp(path, newpath) == 0)
 					break;
 			}
@@ -7334,7 +7339,7 @@ nochange:
 				copycurname();
 				goto nochange;
 			case SEL_EDIT:
-				if (!g_state.picker)
+				if (!(g_state.picker || g_state.fifomode))
 					spawn(editor, newpath, NULL, NULL, F_CLI);
 				continue;
 			default: /* SEL_LOCK */
@@ -7778,6 +7783,8 @@ nochange:
 			}
 			setdirwatch();
 			clearfilter();
+			if (g_state.runplugin == 1) /* Allow filtering in plugins directory */
+				presel = FILTER;
 			goto begin;
 		case SEL_SHELL: // fallthrough
 		case SEL_LAUNCH: // fallthrough
@@ -8145,7 +8152,7 @@ static void check_key_collision(void)
 
 static void usage(void)
 {
-	dprintf(STDERR_FILENO,
+	dprintf(STDOUT_FILENO,
 		"%s: nnn [OPTIONS] [PATH]\n\n"
 		"The unorthodox terminal file manager.\n\n"
 		"positional args:\n"
@@ -8154,7 +8161,7 @@ static void usage(void)
 #ifndef NOFIFO
 		" -a      auto NNN_FIFO\n"
 #endif
-		" -A      no dir auto-enter in type-to-nav\n"
+		" -A      no dir auto-enter during filter\n"
 		" -b key  open bookmark key (trumps -s/S)\n"
 		" -c      cli-only NNN_OPENER (trumps -e)\n"
 		" -C      8-color scheme\n"
@@ -8171,7 +8178,7 @@ static void usage(void)
 		" -g      regex filters\n"
 		" -H      show hidden files\n"
 		" -i      show current file info\n"
-		" -J      no auto-jump on selection\n"
+		" -J      no auto-advance on selection\n"
 		" -K      detect key collision\n"
 		" -l val  set scroll lines\n"
 		" -n      type-to-nav mode\n"

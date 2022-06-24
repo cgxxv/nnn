@@ -12,7 +12,7 @@ else
 end
 
 complete -c nnn -s a    -d 'auto-create NNN_FIFO'
-complete -c nnn -s A    -d 'disable dir auto-select'
+complete -c nnn -s A    -d 'disable dir auto-enter'
 complete -c nnn -s b -r -d 'bookmark key to open' -x -a '(echo $NNN_BMS | awk -F: -v RS=\; \'{print $1"\t"$2}\')'
 complete -c nnn -s c    -d 'cli-only opener'
 complete -c nnn -s C    -d 'color by context'
@@ -24,7 +24,7 @@ complete -c nnn -s f    -d 'use readline history file'
 complete -c nnn -s g    -d 'regex filters'
 complete -c nnn -s H    -d 'show hidden files'
 complete -c nnn -s i    -d 'show current file info'
-complete -c nnn -s J    -d 'no auto-jump on select'
+complete -c nnn -s J    -d 'no auto-advance on selection'
 complete -c nnn -s K    -d 'detect key collision'
 complete -c nnn -s l -r -d 'lines to move per scroll'
 complete -c nnn -s n    -d 'start in type-to-nav mode'

@@ -262,8 +262,9 @@
 #define VLEN 3
 
 /* Volume info */
-#define FREE     0
-#define CAPACITY 1
+#define VFS_AVAIL 0
+#define VFS_USED  1
+#define VFS_SIZE  2
 
 /* TYPE DEFINITIONS */
 typedef unsigned int uint_t;
@@ -314,7 +315,6 @@ typedef struct {
 
 /*
  * Settings
- * NOTE: update default values if changing order
  */
 typedef struct {
 	uint_t filtermode : 1;  /* Set to enter filter mode */
@@ -399,33 +399,10 @@ typedef struct {
 
 /* Configuration, contexts */
 static settings cfg = {
-	0, /* filtermode */
-	0, /* timeorder */
-	0, /* sizeorder */
-	0, /* apparentsz */
-	0, /* blkorder */
-	0, /* extnorder */
-	0, /* showhidden */
-	0, /* reserved0 */
-	0, /* showdetail */
-	1, /* ctxactive */
-	0, /* reverse */
-	0, /* version */
-	0, /* reserved1 */
-	0, /* curctx */
-	0, /* prefersel */
-	0, /* fileinfo */
-	0, /* nonavopen */
-	1, /* autoenter */
-	0, /* reserved2 */
-	0, /* useeditor */
-	0, /* reserved3 */
-	0, /* regex */
-	0, /* x11 */
-	2, /* timetype (T_MOD) */
-	0, /* cliopener */
-	0, /* waitedit */
-	1, /* rollover */
+	.ctxactive = 1,
+	.autoenter = 1,
+	.timetype = 2, /* T_MOD */
+	.rollover = 1,
 };
 
 static context g_ctx[CTX_MAX] __attribute__ ((aligned));
@@ -1033,7 +1010,7 @@ static inline bool is_prefix(const char *restrict str, const char *restrict pref
 
 /*
  * The poor man's implementation of memrchr(3).
- * We are only looking for '/' in this program.
+ * We are only looking for '/' and '.' in this program.
  * And we are NOT expecting a '/' at the end.
  * Ideally 0 < n <= xstrlen(s).
  */
@@ -3097,9 +3074,8 @@ try_quit:
 #ifdef LINUX_INOTIFY
 		if (!cfg.blkorder && inotify_wd >= 0 && (idle & 1)) {
 			struct inotify_event *event;
-			char inotify_buf[EVENT_BUF_LEN];
+			char inotify_buf[EVENT_BUF_LEN] = {0};
 
-			memset((void *)inotify_buf, 0x0, EVENT_BUF_LEN);
 			i = read(inotify_fd, inotify_buf, EVENT_BUF_LEN);
 			if (i > 0) {
 				for (char *ptr = inotify_buf;
@@ -3121,9 +3097,8 @@ try_quit:
 		}
 #elif defined(BSD_KQUEUE)
 		if (!cfg.blkorder && event_fd >= 0 && (idle & 1)) {
-			struct kevent event_data[NUM_EVENT_SLOTS];
+			struct kevent event_data[NUM_EVENT_SLOTS] = {0};
 
-			memset((void *)event_data, 0x0, sizeof(struct kevent) * NUM_EVENT_SLOTS);
 			if (kevent(kq, events_to_monitor, NUM_EVENT_SLOTS,
 				   event_data, NUM_EVENT_FDS, &gtimeout) > 0)
 				c = handle_event();
@@ -3178,7 +3153,7 @@ static void showfilterinfo(void)
 	if (cfg.fileinfo && ndents && get_output("file", "-b", pdents[cur].name, -1, FALSE, FALSE))
 		mvaddstr(xlines - 2, 2, g_buf);
 	else {
-		snprintf(info + i, REGEX_MAX - i - 1, "  %s [/], %s [:]",
+		snprintf(info + i, REGEX_MAX - i - 1, "  %s [/], %4s [:]",
 			 (cfg.regex ? "reg" : "str"),
 			 ((fnstrstr == &strcasestr) ? "ic" : "noic"));
 	}
@@ -4260,12 +4235,10 @@ static void savecurctx(char *path, char *curname, int nextctx)
 static void save_session(const char *sname, int *presel)
 {
 	int fd, i;
-	session_header_t header;
+	session_header_t header = {0};
 	bool status = FALSE;
 	char ssnpath[PATH_MAX];
 	char spath[PATH_MAX];
-
-	memset(&header, 0, sizeof(session_header_t));
 
 	header.ver = SESSIONS_VERSION;
 
@@ -4555,17 +4528,20 @@ static bool xchmod(const char *fpath, mode_t mode)
 	return (chmod(fpath, mode) == 0);
 }
 
-static size_t get_fs_info(const char *path, bool type)
+static size_t get_fs_info(const char *path, uchar_t type)
 {
 	struct statvfs svb;
 
 	if (statvfs(path, &svb) == -1)
 		return 0;
 
-	if (type == CAPACITY)
-		return (size_t)svb.f_blocks << ffs((int)(svb.f_frsize >> 1));
+	if (type == VFS_AVAIL)
+		return (size_t)svb.f_bavail << ffs((int)(svb.f_frsize >> 1));
 
-	return (size_t)svb.f_bavail << ffs((int)(svb.f_frsize >> 1));
+	if (type == VFS_USED)
+		return ((size_t)svb.f_blocks - (size_t)svb.f_bfree) << ffs((int)(svb.f_frsize >> 1));
+
+	return (size_t)svb.f_blocks << ffs((int)(svb.f_frsize >> 1)); /* VFS_SIZE */
 }
 
 /* Create non-existent parents and a file or dir */
@@ -5097,13 +5073,14 @@ static void show_help(const char *path)
 		++end;
 	}
 
-	dprintf(fd, "\nLOCATIONS:\n");
+	dprintf(fd, "\nLOCATIONS\n");
 	for (uchar_t i = 0; i < CTX_MAX; ++i)
 		if (g_ctx[i].c_cfg.ctxactive)
 			dprintf(fd, " %u: %s\n", i + 1, g_ctx[i].c_path);
 
-	dprintf(fd, "\nVOLUME: %s of ", coolsize(get_fs_info(path, FREE)));
-	dprintf(fd, "%s free\n\n", coolsize(get_fs_info(path, CAPACITY)));
+	dprintf(fd, "\nVOLUME: avail:%s ", coolsize(get_fs_info(path, VFS_AVAIL)));
+	dprintf(fd, "used:%s ", coolsize(get_fs_info(path, VFS_USED)));
+	dprintf(fd, "size:%s\n\n", coolsize(get_fs_info(path, VFS_SIZE)));
 
 	if (bookmark) {
 		dprintf(fd, "BOOKMARKS\n");
@@ -5926,7 +5903,7 @@ static void notify_fifo(bool force)
 
 	static struct entry lastentry;
 
-	if (!force && !memcmp(&lastentry, &pdents[cur], sizeof(struct entry)))
+	if (!force && !memcmp(&lastentry, &pdents[cur], sizeof(struct entry))) // NOLINT
 		return;
 
 	lastentry = pdents[cur];
@@ -6324,8 +6301,8 @@ static void statusbar(char *path)
 
 		xstrsncpy(buf, coolsize(dir_blocks << blk_shift), 12);
 
-		printw("%cu:%s free:%s files:%llu %lluB %s\n",
-		       (cfg.apparentsz ? 'a' : 'd'), buf, coolsize(get_fs_info(path, FREE)),
+		printw("%cu:%s avail:%s files:%llu %lluB %s\n",
+		       (cfg.apparentsz ? 'a' : 'd'), buf, coolsize(get_fs_info(path, VFS_AVAIL)),
 		       num_files, (ullong_t)pent->blocks << blk_shift, ptr);
 	} else { /* light or detail mode */
 		char sort[] = "\0\0\0\0\0";
@@ -6613,7 +6590,7 @@ static bool browse(char *ipath, const char *session, int pkey)
 
 #ifndef NOMOUSE
 	MEVENT event = {0};
-	struct timespec mousetimings[2] = {{.tv_sec = 0, .tv_nsec = 0}, {.tv_sec = 0, .tv_nsec = 0} };
+	struct timespec mousetimings[2] = {{.tv_sec = 0, .tv_nsec = 0}, {.tv_sec = 0, .tv_nsec = 0}};
 	int mousedent[2] = {-1, -1};
 	bool currentmouse = 1, rightclicksel = 0;
 #endif

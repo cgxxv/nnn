@@ -13,16 +13,16 @@ CFLAGS_OPTIMIZATION ?= -O3
 
 O_DEBUG := 0  # debug binary
 O_NORL := 0  # no readline support
-O_PCRE := 1  # link with PCRE library
+O_PCRE := 0  # link with PCRE library
 O_NOLC := 0  # no locale support
 O_NOMOUSE := 0  # no mouse support
 O_NOBATCH := 0  # no built-in batch renamer
 O_NOFIFO := 0  # no FIFO previewer support
-O_CTX8 := 1  # enable 8 contexts
+O_CTX8 := 0  # enable 8 contexts
 O_ICONS := 0  # support icons-in-terminal
 O_NERD := 0  # support icons-nerdfont
 O_EMOJI := 0  # support emoji
-O_QSORT := 1  # use Alexey Tourbin's QSORT implementation
+O_QSORT := 0  # use Alexey Tourbin's QSORT implementation
 O_BENCH := 0  # benchmark mode (stops at first user input)
 O_NOSSN := 0  # disable session support
 O_NOUG := 0  # disable user, group name in status bar
@@ -31,9 +31,10 @@ O_MATCHFLTR := 0  # allow filters without matches
 O_NOSORT := 0  # disable sorting entries on dir load
 
 # User patches
-O_GITSTATUS := 1 # add git status to detail view
-O_NAMEFIRST := 1 # print file name first, add uid and guid to detail view
-O_RESTOREPREVIEW := 1 # add preview pipe to close and restore preview pane
+O_COLEMAK := 0 # change key bindings to colemak compatible layout
+O_GITSTATUS := 0 # add git status to detail view
+O_NAMEFIRST := 0 # print file name first, add uid and guid to detail view
+O_RESTOREPREVIEW := 0 # add preview pipe to close and restore preview pane
 
 # convert targets to flags for backwards compatibility
 ifneq ($(filter debug,$(MAKECMDGOALS)),)
@@ -163,6 +164,7 @@ DESKTOPFILE = misc/desktop/nnn.desktop
 LOGOSVG = misc/logo/logo.svg
 LOGO64X64 = misc/logo/logo-64x64.png
 
+COLEMAK = patches/colemak
 GITSTATUS = patches/gitstatus
 NAMEFIRST = patches/namefirst
 RESTOREPREVIEW = patches/restorepreview
@@ -310,6 +312,9 @@ upload-local: sign static musl
 clean:
 	$(RM) -f $(BIN) nnn-$(VERSION).tar.gz *.sig $(BIN)-static $(BIN)-static-$(VERSION).x86_64.tar.gz $(BIN)-icons-static $(BIN)-icons-static-$(VERSION).x86_64.tar.gz $(BIN)-nerd-static $(BIN)-nerd-static-$(VERSION).x86_64.tar.gz $(BIN)-emoji-static $(BIN)-emoji-static-$(VERSION).x86_64.tar.gz $(BIN)-musl-static $(BIN)-musl-static-$(VERSION).x86_64.tar.gz
 
+checkpatches:
+	./patches/check-patches.sh
+
 prepatch:
 ifeq ($(strip $(O_NAMEFIRST)),1)
 	patch --forward $(PATCH_OPTS) --strip=1 --input=$(NAMEFIRST)/mainline.diff
@@ -321,6 +326,9 @@ else ifeq ($(strip $(O_GITSTATUS)),1)
 endif
 ifeq ($(strip $(O_RESTOREPREVIEW)),1)
 	patch --forward $(PATCH_OPTS) --strip=1 --input=$(RESTOREPREVIEW)/mainline.diff
+endif
+ifeq ($(strip $(O_COLEMAK)),1)
+	patch --forward $(PATCH_OPTS) --strip=1 --input=$(COLEMAK)/mainline.diff
 endif
 
 postpatch:
@@ -334,6 +342,9 @@ else ifeq ($(strip $(O_GITSTATUS)),1)
 endif
 ifeq ($(strip $(O_RESTOREPREVIEW)),1)
 	patch --reverse $(PATCH_OPTS) --strip=1 --input=$(RESTOREPREVIEW)/mainline.diff
+endif
+ifeq ($(strip $(O_COLEMAK)),1)
+	patch --reverse $(PATCH_OPTS) --strip=1 --input=$(COLEMAK)/mainline.diff
 endif
 
 skip: ;

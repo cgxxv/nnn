@@ -1,3 +1,5 @@
 *.o
 *.dSYM
 nnn
+.vscode
+src/nnn.c.orig
